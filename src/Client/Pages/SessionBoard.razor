@@ -1,0 +1,359 @@
+@page "/s/{sessionCode}"
+@using ScrumPoker.Client.Services
+@using MudBlazor
+@namespace ScrumPoker.Client.Pages
+@inject SessionState State
+@inject SessionHubClient Hub
+@inject HttpClient Http
+
+<MudStack Spacing="2">
+    <MudPaper Class="pa-4" Elevation="2">
+    <MudText Typo="Typo.h6">Session @sessionCode</MudText>
+        @if(_snapshot is null)
+        {
+            <MudProgressLinear Indeterminate Color="Color.Primary" Class="mt-2" />
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Participants (@_snapshot.Participants.Count)</MudText>
+            <MudChipSet T="string">
+                @foreach (var p in _snapshot.Participants)
+                {
+                    <MudChip T="string" Color="@(p.IsHost ? Color.Primary : Color.Info)" Variant="Variant.Filled">@p.DisplayName@if(p.IsHost){<text>*</text>}</MudChip>
+                }
+            </MudChipSet>
+        }
+    </MudPaper>
+
+    @if(_snapshot is not null && _activeWorkItem is not null && _activeWorkItem.State == "Revealed")
+    {
+        <MudPaper Class="pa-3" Elevation="1" Style="border-left:4px solid var(--mud-palette-warning);">
+            <MudStack Spacing="1">
+                <MudText Typo="Typo.subtitle2">Estimates Revealed</MudText>
+                @{
+                    var groups = _activeWorkItem.Estimates?
+                        .GroupBy(e => e.GetType().GetProperty("value")?.GetValue(e)?.ToString() ?? "?")
+                        .OrderByDescending(g => g.Count())
+                        .ThenBy(g => g.Key)
+                        .ToList();
+                    if(groups is not null && groups.Count > 0)
+                    {
+                        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                            @foreach(var g in groups)
+                            {
+                                <MudChip T="string" Color="Color.Warning" Variant="Variant.Outlined" Size="Size.Small">@g.Key (@g.Count())</MudChip>
+                            }
+                        </MudStack>
+                        var top = groups.First();
+                        <MudText Typo="Typo.caption" Class="mt-1">Leading value: <strong>@top.Key</strong> (@top.Count())</MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption">No estimates submitted.</MudText>
+                    }
+                }
+            </MudStack>
+        </MudPaper>
+    }
+
+    <MudPaper Class="pa-4" Elevation="2">
+        <MudText Typo="Typo.subtitle1">Work Items</MudText>
+        @if(_snapshot?.WorkItems?.Count == 0)
+        {
+            <MudText Class="mud-text-disabled">None yet</MudText>
+        }
+        else if(_snapshot is not null)
+        {
+            <MudTable Items="_snapshot.WorkItems" Dense="true" Hover="true" Bordered="true">
+                <HeaderContent>
+                    <MudTh>Title</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Estimates</MudTh>
+                    <MudTh>Created</MudTh>
+                    <MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Title">
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="(() => SelectWorkItem(context.Id))" Class="pa-0" Style="text-transform:none;min-width:0;">@context.Title</MudButton>
+                        @if(_activeWorkItem?.Id == context.Id)
+                        {
+                            <MudIcon Color="Color.Warning" Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small" Class="ml-1" />
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Status">
+                        @switch(context.State)
+                        {
+                            case "ActiveEstimating": <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">Estimating</MudChip>; break;
+                            case "Revealed": <MudChip T="string" Color="Color.Warning" Variant="Variant.Outlined" Size="Size.Small">Revealed</MudChip>; break;
+                            case "Finalized": <MudChip T="string" Color="Color.Success" Variant="Variant.Outlined" Size="Size.Small">Finalized</MudChip>; break;
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Estimates">
+                        @if(context.State == "ActiveEstimating")
+                        {
+                            var count = context.Estimates?.Count() ?? 0;
+                            <MudText Typo="Typo.caption">@count submitted</MudText>
+                        }
+                        else if(context.State == "Revealed")
+                        {
+                            var dist = context.Estimates?.GroupBy(e => e.GetType().GetProperty("value")?.GetValue(e)?.ToString() ?? "?")
+                                .OrderByDescending(g => g.Count())
+                                .Select(g => $"{g.Key}:{g.Count()}");
+                            <MudText Typo="Typo.caption">@string.Join(" ", dist ?? Array.Empty<string>())</MudText>
+                        }
+                        else if(context.State == "Finalized")
+                        {
+                            <MudText Typo="Typo.caption">Final: @context.FinalEstimate</MudText>
+                        }
+                    </MudTd>
+                    <MudTd DataLabel="Created">@context.CreatedUtc.ToLocalTime().ToString("HH:mm:ss")</MudTd>
+                    <MudTd DataLabel="Actions">
+                        @if(context.State == "ActiveEstimating")
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" Disabled="_actionBusy" OnClick="(() => RevealAsync(context.Id))">Reveal</MudButton>
+                        }
+                        else if(context.State == "Revealed")
+                        {
+                            <MudButton Variant="Variant.Text" Color="Color.Success" Disabled="_actionBusy" OnClick="(() => FinalizeAsync(context.Id))">Finalize</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+        <MudDivider Class="my-3" />
+        <MudStack Row="true" Spacing="2">
+            <MudTextField @bind-Value="_newWorkItemTitle" Label="New Work Item" Variant="Variant.Outlined" />
+            <MudButton OnClick="AddWorkItemAsync" Disabled="string.IsNullOrWhiteSpace(_newWorkItemTitle) || _busy" Variant="Variant.Filled" Color="Color.Primary">Add</MudButton>
+        </MudStack>
+        @if(!string.IsNullOrEmpty(_error))
+        {
+            <MudText Color="Color.Error" Class="mt-2">@_error</MudText>
+        }
+    </MudPaper>
+
+    @if(_snapshot is not null)
+    {
+        <MudPaper Class="pa-4" Elevation="2">
+            <MudText Typo="Typo.subtitle1">Estimate</MudText>
+            @if(_activeWorkItem is null)
+            {
+                <MudText Class="mud-text-disabled">Add a work item to start estimating.</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.subtitle2" Class="mb-2">@_activeWorkItem.Title</MudText>
+                <MudStack Row="true" Spacing="1" Class="mb-2">
+                    @foreach(var v in _snapshot.Deck)
+                    {
+                        var disabled = _activeWorkItem.State != "ActiveEstimating" || _submitting || _submittedValue == v;
+                        <MudChip T="string" Variant="Variant.Filled" Color="@(_submittedValue == v ? Color.Success : Color.Primary)" Disabled="disabled" OnClick="(() => SubmitEstimateAsync(v))">@v</MudChip>
+                    }
+                    <MudChip T="string" Variant="Variant.Outlined" Color="Color.Secondary" Disabled='@(_activeWorkItem.State != "ActiveEstimating" || _submitting || _submittedValue == "?")' OnClick='(() => SubmitEstimateAsync("?"))'>?</MudChip>
+                </MudStack>
+                @if(_activeWorkItem.State == "Revealed")
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">Estimates revealed. Awaiting finalization.</MudAlert>
+                }
+                else if(_activeWorkItem.State == "Finalized")
+                {
+                    <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">Finalized: @_activeWorkItem.FinalEstimate</MudAlert>
+                }
+                @if(!string.IsNullOrEmpty(_estimateError))
+                {
+                    <MudText Color="Color.Error">@_estimateError</MudText>
+                }
+            }
+        </MudPaper>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public string? sessionCode { get; set; }
+    private SessionHubClient.SessionSnapshotDto? _snapshot;
+    private string _newWorkItemTitle = string.Empty;
+    private bool _busy;
+    private string? _error;
+    private SessionHubClient.WorkItemDto? _activeWorkItem;
+    private bool _submitting;
+    private string? _estimateError;
+    private string? _submittedValue;
+    private bool _actionBusy;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (sessionCode is null) return;
+        if (State.CurrentSessionCode != sessionCode)
+        {
+            await Hub.JoinSessionAsync(sessionCode);
+            await LoadSnapshotAsync(sessionCode);
+        }
+        else
+        {
+            _snapshot = State.Current;
+        }
+    }
+
+    private async Task LoadSnapshotAsync(string sessionCode)
+    {
+        try
+        {
+            var snap = await Http.GetFromJsonAsync<SessionHubClient.SessionSnapshotDto>($"api/sessions/{sessionCode}");
+            if (snap is not null)
+            {
+                State.SetSnapshot(snap);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task AddWorkItemAsync()
+    {
+    if (sessionCode is null) return;
+        _busy = true; _error = null;
+        try
+        {
+            var response = await Http.PostAsJsonAsync($"api/sessions/{sessionCode}/work-items", new { title = _newWorkItemTitle });
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = "Failed to add";
+            }
+            else
+            {
+                _newWorkItemTitle = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OnStateChanged()
+    {
+        _snapshot = State.Current;
+        _activeWorkItem = _snapshot?.WorkItems.FirstOrDefault(w => w.State == "ActiveEstimating" || w.State == "Revealed")
+            ?? _snapshot?.WorkItems.OrderByDescending(w => w.CreatedUtc).FirstOrDefault();
+        if(_snapshot is not null && State.SelfParticipantId is not null && _activeWorkItem is not null && _activeWorkItem.Estimates is not null)
+        {
+            foreach (var e in _activeWorkItem.Estimates)
+            {
+                var pidProp = e.GetType().GetProperty("participantId");
+                var valProp = e.GetType().GetProperty("value");
+                if (pidProp != null && valProp != null)
+                {
+                    var pid = pidProp.GetValue(e)?.ToString();
+                    if(Guid.TryParse(pid, out var gid) && gid == State.SelfParticipantId)
+                    {
+                        _submittedValue = valProp.GetValue(e)?.ToString();
+                        break;
+                    }
+                }
+            }
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SubmitEstimateAsync(string value)
+    {
+        if (_snapshot is null || _activeWorkItem is null || State.SelfParticipantId is null) return;
+        _estimateError = null; _submitting = true; StateHasChanged();
+        try
+        {
+            var payload = new { participantId = State.SelfParticipantId, value };
+            var resp = await Http.PostAsJsonAsync($"api/sessions/{_snapshot.Code}/work-items/{_activeWorkItem.Id}/estimates", payload);
+            if(!resp.IsSuccessStatusCode)
+            {
+                _estimateError = "Submit failed";
+            }
+            else
+            {
+                _submittedValue = value;
+            }
+        }
+        catch(Exception ex)
+        {
+            _estimateError = ex.Message;
+        }
+        finally
+        {
+            _submitting = false; StateHasChanged();
+        }
+    }
+
+    private void SelectWorkItem(Guid id)
+    {
+        _activeWorkItem = _snapshot?.WorkItems.FirstOrDefault(w => w.Id == id) ?? _activeWorkItem;
+        _submittedValue = null;
+        if(_activeWorkItem is not null && State.SelfParticipantId is not null && _activeWorkItem.Estimates is not null)
+        {
+            foreach (var e in _activeWorkItem.Estimates)
+            {
+                var pidProp = e.GetType().GetProperty("participantId");
+                var valProp = e.GetType().GetProperty("value");
+                if (pidProp != null && valProp != null)
+                {
+                    var pid = pidProp.GetValue(e)?.ToString();
+                    if(Guid.TryParse(pid, out var gid) && gid == State.SelfParticipantId)
+                    {
+                        _submittedValue = valProp.GetValue(e)?.ToString();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private async Task RevealAsync(Guid id)
+    {
+        if (_snapshot is null) return; _actionBusy = true; StateHasChanged();
+        try
+        {
+            var resp = await Http.PostAsync($"api/sessions/{_snapshot.Code}/work-items/{id}/reveal", null);
+            if(!resp.IsSuccessStatusCode) { _error = "Reveal failed"; }
+        }
+        catch(Exception ex){ _error = ex.Message; }
+        finally { _actionBusy = false; StateHasChanged(); }
+    }
+
+    private async Task FinalizeAsync(Guid id)
+    {
+        if (_snapshot is null) return; _actionBusy = true; StateHasChanged();
+        try
+        {
+            var wi = _snapshot.WorkItems.First(w => w.Id == id);
+            string value = wi.FinalEstimate ?? "";
+            if(string.IsNullOrEmpty(value) && wi.Estimates is not null)
+            {
+                var groups = wi.Estimates
+                    .Select(e => e.GetType().GetProperty("value")?.GetValue(e)?.ToString() ?? "?")
+                    .Where(v => v != "?")
+                    .GroupBy(v => v)
+                    .OrderByDescending(g => g.Count())
+                    .ThenBy(g => g.Key);
+                value = groups.FirstOrDefault()?.Key ?? "1";
+            }
+            var payload = new Dictionary<string,string>{{"value", value}};
+            var resp = await Http.PostAsJsonAsync($"api/sessions/{_snapshot.Code}/work-items/{id}/finalize", payload);
+            if(!resp.IsSuccessStatusCode) { _error = "Finalize failed"; }
+        }
+        catch(Exception ex){ _error = ex.Message; }
+        finally { _actionBusy = false; StateHasChanged(); }
+    }
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+    }
+}

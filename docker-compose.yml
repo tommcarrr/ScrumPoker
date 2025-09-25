@@ -1,0 +1,41 @@
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: azurite
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    healthcheck:
+      # Use node to attempt a raw TCP connection to blob service port; exit 0 on success.
+      test: ["CMD", "node", "-e", "const n=require('net');const s=n.createConnection(10000,'127.0.0.1',()=>{s.end();process.exit(0);});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000);"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 2s
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Server/Dockerfile
+    container_name: scrumpoker-api
+    depends_on:
+      azurite:
+        condition: service_healthy
+    environment:
+      - ASPNETCORE_URLS=http://+:5000
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DOTNET_ENVIRONMENT=Development
+      - AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  default:
+    name: scrumpoker-net

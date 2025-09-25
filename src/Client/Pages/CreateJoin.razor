@@ -1,0 +1,78 @@
+@page "/"
+@using System.Net.Http.Json
+@using MudBlazor
+@namespace ScrumPoker.Client.Pages
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ScrumPoker.Client.Services.SessionState State
+@inject ScrumPoker.Client.Services.SessionHubClient Hub
+
+<MudPaper Class="pa-4" Elevation="4" Style="max-width:600px;margin:auto;margin-top:3rem;" data-test="create-join-page">
+    <MudText Typo="Typo.h5" GutterBottom>Scrum Poker</MudText>
+    <MudText Typo="Typo.subtitle2" GutterBottom>Create a new session or join an existing one.</MudText>
+    <MudDivider Class="my-3" />
+    <MudForm @ref="_form">
+    <MudTextField @bind-Value="_displayName" Label="Display Name" Required="true" For="@(() => _displayName)" data-test="display-name-input" />
+        <MudStack Row="true" Spacing="2" Class="mt-3">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy" OnClick="CreateSessionAsync" data-test="create-button">Create Session</MudButton>
+            <MudTextField @bind-Value="_joinCode" Label="Session Code" MaxLength="6" Style="width:120px" data-test="join-code-input" />
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Disabled="_busy || string.IsNullOrWhiteSpace(_joinCode)" OnClick="JoinSessionAsync" data-test="join-button">Join</MudButton>
+        </MudStack>
+        @if(!string.IsNullOrEmpty(_error))
+        {
+            <MudText Color="Color.Error" Class="mt-2" data-test="error-text">@_error</MudText>
+        }
+    </MudForm>
+</MudPaper>
+
+@code {
+    private MudForm? _form;
+    private string _displayName = string.Empty;
+    private string _joinCode = string.Empty;
+    private bool _busy;
+    private string? _error;
+
+    private async Task CreateSessionAsync()
+    {
+        _error = null; _busy = true; StateHasChanged();
+        try
+        {
+            var resp = await Http.PostAsync("api/sessions", null);
+            if(!resp.IsSuccessStatusCode){ _error = "Create failed"; return; }
+            var session = await resp.Content.ReadFromJsonAsync<CreateSessionResponse>();
+            if(session is null){ _error = "Invalid response"; return; }
+            await Hub.JoinSessionAsync(session.code);
+            await JoinDisplayNameAsync(session.code);
+        }
+        catch(Exception ex){ _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task JoinSessionAsync()
+    {
+        _error = null; _busy = true; StateHasChanged();
+        try
+        {
+            var code = _joinCode.Trim().ToUpperInvariant();
+            await JoinDisplayNameAsync(code);
+        }
+        catch(Exception ex){ _error = ex.Message; }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task JoinDisplayNameAsync(string code)
+    {
+        if(string.IsNullOrWhiteSpace(_displayName)) { _error = "Display name required"; return; }
+        var joinResp = await Http.PostAsJsonAsync($"api/sessions/{code}/participants", new { displayName = _displayName });
+        if(!joinResp.IsSuccessStatusCode)
+        {
+            _error = joinResp.StatusCode == System.Net.HttpStatusCode.NotFound ? "Session not found" : "Join failed";
+            return;
+        }
+        await Hub.JoinSessionAsync(code);
+        State.SetSelfDisplayName(_displayName);
+        Nav.NavigateTo($"/s/{code}");
+    }
+
+    private record CreateSessionResponse(string code, List<string> deck, string createdUtc);
+}

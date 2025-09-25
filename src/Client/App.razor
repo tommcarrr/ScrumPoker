@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@using ScrumPoker.Client.Pages
+<Router AppAssembly="typeof(ScrumPoker.Client.Services.SessionState).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" />
+    </Found>
+    <NotFound>
+        <p>Not found</p>
+    </NotFound>
+</Router>

@@ -1,0 +1,6 @@
+/* Moved from nested server project */
+@import url('lib/bootstrap/dist/css/bootstrap.min.css');
+
+body {
+  font-family: system-ui, Arial, sans-serif;
+}

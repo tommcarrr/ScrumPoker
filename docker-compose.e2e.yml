@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: src/Server/Dockerfile
+    image: scrumpoker-app:e2e
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "5080:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  tests:
+    image: mcr.microsoft.com/playwright:v1.47.2-jammy
+    depends_on:
+      app:
+        condition: service_healthy
+    working_dir: /tests
+    volumes:
+      - ./e2e:/tests
+    environment:
+      BASE_URL: http://app:5000
+    # Install project dependencies (node_modules lives on the mounted volume) then run tests
+    entrypoint: ["/bin/sh", "-c", "npm install && npx playwright test --reporter=line"]

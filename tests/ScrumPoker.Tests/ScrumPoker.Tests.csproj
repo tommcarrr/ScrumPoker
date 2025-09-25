@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+  <PackageReference Include="Bogus" Version="35.6.3" PrivateAssets="all" />
+  <PackageReference Include="coverlet.collector" Version="6.0.4" PrivateAssets="all" />
+  <PackageReference Include="FluentAssertions" Version="8.6.0" PrivateAssets="all" />
+  <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.9" PrivateAssets="all" />
+  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" PrivateAssets="all" />
+  <PackageReference Include="xunit" Version="2.9.3" PrivateAssets="all" />
+  <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Server\ScrumPoker.Server.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

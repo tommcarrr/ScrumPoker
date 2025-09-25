@@ -1,0 +1,32 @@
+# Build artifacts
+**/bin/
+**/obj/
+
+# User specific
+*.user
+*.suo
+.vscode/
+.idea/
+*.swp
+
+# Git
+.git
+.gitignore
+
+# Tests (not needed for runtime image build)
+tests/
+.specify/
+
+# Logs
+*.log
+
+# Node / front-end caches
+node_modules/
+
+# Misc
+Dockerfile*
+compose.yaml
+*.md
+LICENSE
+README.md
+CHANGELOG.md
